@@ -724,10 +724,7 @@ class TextAugment:
             # we check to see if the already tagged items in src lang should have scores for tags increased or are common words in target lang and should not be tagged.
             # we also add new labels for items that are already tagged in src_lang.
 
-            if src_is_cjk:
-                sep = ""
-            else:
-                sep = " "
+            sep = "" if src_is_cjk else " "
 
             if src_is_cjk:
                 lbracket = "[["
@@ -949,10 +946,9 @@ class TextAugment:
             # backtrans from src_lang to target_lang back to src_lang allows us to catch more NER using target lang NER tools.
             # then we tag in target_lang those items we haven't already found, and tranlsate back to match the original text.
             # NOTE: We do not modify the original text, but only use backtrans to do NER tagging and other analysis.
-            if target_is_cjk:
-                sep = ""
-            else:
-                sep = " "
+
+            sep = "" if target_is_cjk else " "
+
             if target_is_cjk:
                 lbracket = "[["
                 rbracket = "]]"
@@ -1174,10 +1170,7 @@ class TextAugment:
                     target_lang='en'):
 
         src_is_cjk = src_lang in ('zh', 'ko', 'ja')
-        if src_is_cjk:
-            sep = ""
-        else:
-            sep = " "
+        sep = "" if src_is_cjk else " "
 
         if docs is None:
             docs, domain = get_docs(src_lang=src_lang)
@@ -1215,7 +1208,7 @@ class TextAugment:
             doc['domain'] = domain
             doc['chunks'] = []
 
-            self._split_text_into_chunks(src_lang=src_lang, src_is_cjk=src_is_cjk, doc=doc, batch_window=batch_window, chunks=chunks)
+            self._split_text_into_chunks(src_lang=src_lang, src_is_cjk=src_is_cjk, doc=doc, batch_window=batch_window, sep=sep, chunks=chunks)
 
         docs = dict([(doc['id'], doc) for doc in docs])
         if do_docs_trim:
