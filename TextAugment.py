@@ -53,8 +53,8 @@ from utils import (
     get_oscar_urls,
     download_urls,
     CharManager,
+    get_docs,
 )
-
 
 # torch.cuda.empty_cache()
 # labse = SentenceTransformer("sentence-transformers/LaBSE").half().eval().cuda()
@@ -63,7 +63,6 @@ from utils import (
 # ontology_manager = None  # OntologyManager(target_lang='en') #target_lang=target_lang
 # translation_pipelines = {}
 # ner_model_name2pipelines = {}
-
 
 logging.basicConfig(format='%(asctime)s - %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S',
@@ -96,8 +95,8 @@ class TextAugment:
         self.special_char = CharManager.special_char
         self.junk = CharManager.junk
 
-        #models
-        #labse model from sentence transformers
+        # models
+        # labse model from sentence transformers
         self.labse = SentenceTransformer("sentence-transformers/LaBSE").half().eval().cuda()
 
         # spacy
@@ -146,7 +145,6 @@ class TextAugment:
                     max_stoword = self.max_stoword_len_ko
                 elif src_lang == "ja":
                     max_stoword = self.max_stoword_len_ja
-
 
                 len_s = len(s)
                 stop_cnt = 0
@@ -602,6 +600,50 @@ class TextAugment:
             return docs, chunks
         print('trim_to_prefer_person', (len_docs - len(docs2)) / len_docs)
         return docs2, chunks2
+
+    def _split_text_into_chunks(self,
+                                src_lang: str,
+                                src_is_cjk: bool,
+                                doc: Dict,
+                                batch_window: int,
+                                sep: str,
+                                chunks: [Dict],
+                                ) -> None:
+        offset = 0
+        text = []
+
+        textarr = doc[f'{src_lang}_text'] if src_is_cjk else doc[f'{src_lang}_text'].split()
+
+        for t in textarr:
+            punc_found = [punc for punc in t if punc in self.punc_char]
+            if punc_found and t[-1] not in self.punc_char and t[0] not in "0123456789" and t[0] == t[0].lower():
+                w = t[t.index(punc_found[0]) + 1]
+                if w == w.upper():
+                    t, t1 = t.split(punc_found[0], 1)
+                    t = t + punc_found[0] + (" " if src_is_cjk else "")
+                    text.append(t)
+                    text.append(t1)
+                    continue
+            text.append(t)
+        text[0] = text[0].lstrip()
+        text[-1] = text[-1].rstrip()
+        doc[f'{src_lang}_text'] = sep.join(text)
+        len_text = len(text)
+        while len_text > batch_window:
+            for j in range(batch_window - 1, len_text):
+                if (src_is_cjk and text[j] in self.punc_char) or (
+                        not src_is_cjk and text[j][-1] in self.punc_char):
+                    break
+            text_str = sep.join(text[:j + 1])
+            chunks.append({f'{src_lang}_text': text_str, 'id': doc['id'], f'{src_lang}_offset': offset})
+            doc['chunks'].append(chunks[-1])
+            offset += len(text_str) + (0 if src_is_cjk else 1)
+            text = text[j + 1:]
+            len_text = len(text)
+        if text:
+            text_str = sep.join(text)
+            chunks.append({f'{src_lang}_text': text_str, 'id': doc['id'], f'{src_lang}_offset': offset})
+            doc['chunks'].append(chunks[-1])
 
     def process_ner_chunks_with_trans(self,
                                       src_lang,
@@ -1112,8 +1154,7 @@ class TextAugment:
         return docs, chunks
 
     def process_ner(self,
-                    src_lang,
-                    text=None,
+                    src_lang: str = None,
                     docs=None,
                     do_spacy=True,
                     do_hf_ner=True,
@@ -1131,100 +1172,50 @@ class TextAugment:
                     do_postprocessing_after_backtrans=False,
                     cutoff=None,
                     target_lang='en'):
+
         src_is_cjk = src_lang in ('zh', 'ko', 'ja')
         if src_is_cjk:
             sep = ""
         else:
             sep = " "
 
-        if text is None and docs is None:
-            try:
-                domain = 'oscar_registry'
-                d = load_dataset("TurkuNLP/register_oscar", data_files=f"{src_lang}/{src_lang}_00000*")
-                docs = [doc for doc in d['train'] if 'labels' not in doc or doc['labels'] != []]
-            except:
-                try:
-                    domain = 'mc4_registry'
-                    d = load_dataset("TurkuNLP/register_mc4", data_files=f"{src_lang}/{src_lang}_00000*")
-                    docs = [doc for doc in d['train'] if 'labels' not in doc or doc['labels'] != []]
-                except:
-                    domain = 'oscar'
-                    url = get_oscar_urls(src_lang)[0]
-                    download_urls([url])
-                    docs = [{f'{src_lang}_text': text.decode()} for text in open(url.split("/")[-1], "rb").readlines()]
-        elif docs is None:
-            if isinstance(text, str):
-                docs = [{f'{src_lang}_text': text}]
-            elif isinstance(text, list):
-                if isinstance(text[0], dict):
-                    docs = text
-                else:
-                    docs = [{f'{src_lang}_text': t} for t in text]
+        if docs is None:
+            docs, domain = get_docs(src_lang=src_lang)
+        elif isinstance(docs, str):
+            docs = [{f'{src_lang}_text': docs}]
+        elif isinstance(docs, list):
+            if isinstance(docs[0], dict):
+                docs = docs
+            else:
+                docs = [{f'{src_lang}_text': t} for t in docs]
+
         # for testing only
         if cutoff is not None and len(docs) > cutoff:
             docs = docs[:cutoff]
-        # print (docs)
+
         len_docs = len(docs)
         for doc in docs:
             doc[f'{src_lang}_text'] = doc['text']
             del doc['text']
+
         badwords1 = set([s for s in badwords_ac_dc.get(src_lang, []) if len(s) < 5])
         stopwords1 = set(stopwords_ac_dc.get(src_lang, []))
         docs = [doc for doc in docs if
                 self.check_good_sentence(doc[f'{src_lang}_text'], src_lang, stopwords=stopwords1, badwords=badwords1)]
-        print('trimmed junk', (len_docs - len(docs)) / len_docs)
-        len_d = len(docs)
-        # badwords2 = set([s for s in badwords_ac_dc.get(target_lang, []) if len(s) < 5])
+        logging.info('trimmed junk', (len_docs - len(docs)) / len_docs)
 
-        counter = {}
         chunks = []
-        _id = -1
-        for doc in docs:
-            _id += 1
+
+        for _id, doc in enumerate(docs):
             if 'id' not in doc:
                 doc['id'] = str(_id)
-            doc[f'{src_lang}_text'] = doc[f'{src_lang}_text'].replace("[", "(").replace("]",
-                                                                                        ")")  # we use [] as special chars
+            doc.setdefault('id', str(_id))
+            doc[f'{src_lang}_text'] = doc[f'{src_lang}_text'].replace("[", "(").replace("]",")")  # we use [] as special chars
             doc['lang'] = src_lang
             doc['domain'] = domain
             doc['chunks'] = []
-            offset = 0
-            if src_is_cjk:
-                textarr = doc[f'{src_lang}_text']
-            else:
-                textarr = doc[f'{src_lang}_text'].split()
-            if True:
-                text = []
-                for t in textarr:
-                    punc_found = [punc for punc in t if punc in self.punc_char]
-                    if punc_found and t[-1] not in self.punc_char and t[0] not in "0123456789" and t[0] == t[0].lower():
-                        w = t[t.index(punc_found[0]) + 1]
-                        if w == w.upper():
-                            t, t1 = t.split(punc_found[0], 1)
-                            t = t + punc_found[0] + (" " if src_is_cjk else "")
-                            text.append(t)
-                            text.append(t1)
-                            continue
-                    text.append(t)
-                text[0] = text[0].lstrip()
-                text[-1] = text[-1].rstrip()
-                doc[f'{src_lang}_text'] = sep.join(text)
-                len_text = len(text)
-                while len_text > batch_window:
-                    for j in range(batch_window - 1, len_text):
-                        if (src_is_cjk and text[j] in self.punc_char) or (
-                                not src_is_cjk and text[j][-1] in self.punc_char):
-                            break
-                    text_str = sep.join(text[:j + 1])
-                    chunks.append({f'{src_lang}_text': text_str, 'id': doc['id'], f'{src_lang}_offset': offset})
-                    doc['chunks'].append(chunks[-1])
-                    offset += len(text_str) + (0 if src_is_cjk else 1)
-                    text = text[j + 1:]
-                    len_text = len(text)
-                if text:
-                    text_str = sep.join(text)
-                    chunks.append({f'{src_lang}_text': text_str, 'id': doc['id'], f'{src_lang}_offset': offset})
-                    doc['chunks'].append(chunks[-1])
+
+            self._split_text_into_chunks(src_lang=src_lang, src_is_cjk=src_is_cjk, doc=doc, batch_window=batch_window, chunks=chunks)
 
         docs = dict([(doc['id'], doc) for doc in docs])
         if do_docs_trim:
