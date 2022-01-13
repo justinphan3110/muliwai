@@ -598,7 +598,7 @@ class TextAugment:
         docs2 = dict([(doc['id'], doc) for doc in docs.values() if doc['id'] in do_ids])
         if len(docs2) == 0 or len_docs == len(docs2):
             return docs, chunks
-        print('trim_to_prefer_person', (len_docs - len(docs2)) / len_docs)
+        logging.info(f'trim_to_prefer_person {str((len_docs - len(docs2)) / len_docs)}')
         return docs2, chunks2
 
     def _split_text_into_chunks(self,
@@ -1195,7 +1195,7 @@ class TextAugment:
         stopwords1 = set(stopwords_ac_dc.get(src_lang, []))
         docs = [doc for doc in docs if
                 self.check_good_sentence(doc[f'{src_lang}_text'], src_lang, stopwords=stopwords1, badwords=badwords1)]
-        logging.info('trimmed junk', (len_docs - len(docs)) / len_docs)
+        logging.info(f'trimmed junk {str((len_docs - len(docs)) / len_docs)}')
 
         chunks = []
 

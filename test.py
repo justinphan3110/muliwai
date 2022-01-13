@@ -1,3 +1,4 @@
+import nltk
 from TextAugment import TextAugment
 
 processor = TextAugment()
