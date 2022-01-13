@@ -1,6 +1,7 @@
 import logging
 import tqdm
 
+
 class LoggingHandler(logging.Handler):
     def __init__(self, level=logging.NOTSET):
         super().__init__(level)
@@ -17,7 +18,7 @@ class LoggingHandler(logging.Handler):
 
 
 def install_logger(
-    given_logger, level = logging.WARNING, fmt="%(levelname)s:%(name)s:%(message)s"
+        given_logger, level=logging.WARNING, fmt="%(levelname)s:%(name)s:%(message)s"
 ):
     """ Configures the given logger; format, logging level, style, etc """
     import coloredlogs

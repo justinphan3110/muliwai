@@ -5,7 +5,7 @@ import fsspec
 from datasets import load_dataset
 import logging
 
-from utils import LoggingHandler
+from .LogingHandler import LoggingHandler
 
 logging.basicConfig(format='%(asctime)s - %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S',
